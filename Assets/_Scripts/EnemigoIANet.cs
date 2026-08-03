@@ -10,6 +10,7 @@ public class EnemigoIANet : NetworkBehaviour
     public int danioAtaque = 35;
     public float tiempoEntreAtaques = 2f;
     public float radioDivagar = 10f;
+    public float velocidadHuida = 6f;
 
     private NavMeshAgent agent;
     private Animator anim;
@@ -31,34 +32,47 @@ public class EnemigoIANet : NetworkBehaviour
         if (IsServer)
         {
             BuscarJugadorMasCercano();
+            DungeonManagerNet manager = FindAnyObjectByType<DungeonManagerNet>();
+
+            // LA ESFERA FUE TOCADA -> MODO HUIDA ACTIVADO (ESTILO PAC-MAN)
+            bool esferaTocada = (manager != null && manager.esferaTocada.Value);
 
             if (jugadorObjetivo != null)
             {
                 float distancia = Vector3.Distance(transform.position, jugadorObjetivo.position);
 
-                if (distancia <= radioAtaque)
+                if (distancia <= radioVision)
                 {
-                    // ESTADO: ATACAR
-                    agent.isStopped = true;
-                    estadoIA.Value = 0; // Se queda quieto para golpear
-
-                    if (Time.time >= temporizadorAtaque)
+                    // SI SE COGIÓ LA ESFERA: HUYEN Y NUNCA ATACAN
+                    if (esferaTocada)
                     {
-                        AtacarJugador();
-                        temporizadorAtaque = Time.time + tiempoEntreAtaques;
+                        HuirDelJugador();
                     }
-                }
-                else if (distancia <= radioVision)
-                {
-                    // ESTADO: PERSEGUIR
-                    agent.isStopped = false;
-                    agent.speed = 6f; // Velocidad de carrera (Injured Run)
-                    agent.SetDestination(jugadorObjetivo.position);
-                    estadoIA.Value = 2; // Estado 2 = Correr
+                    else
+                    {
+                        // MODO NORMAL: PERSEGUIR Y ATACAR
+                        if (distancia <= radioAtaque)
+                        {
+                            agent.isStopped = true;
+                            estadoIA.Value = 0; // Se queda quieto para golpear
+
+                            if (Time.time >= temporizadorAtaque)
+                            {
+                                AtacarJugador();
+                                temporizadorAtaque = Time.time + tiempoEntreAtaques;
+                            }
+                        }
+                        else
+                        {
+                            agent.isStopped = false;
+                            agent.speed = 6f; // Velocidad de carrera
+                            agent.SetDestination(jugadorObjetivo.position);
+                            estadoIA.Value = 2; // Estado 2 = Correr
+                        }
+                    }
                 }
                 else
                 {
-                    // ESTADO: DIVAGAR (Fuera de rango)
                     DivagarPorLaArena();
                 }
             }
@@ -70,6 +84,34 @@ public class EnemigoIANet : NetworkBehaviour
 
         // 2. TODOS LOS CLIENTES ACTUALIZAN LA ANIMACIÓN VISUAL
         ActualizarAnimaciones();
+    }
+
+    void HuirDelJugador()
+    {
+        agent.isStopped = false;
+        agent.speed = velocidadHuida;
+
+        // Calculamos la dirección totalmente opuesta al jugador
+        Vector3 direccionOpuesta = (transform.position - jugadorObjetivo.position).normalized;
+        Vector3 puntoHuida = transform.position + direccionOpuesta * 10f;
+
+        NavMeshHit hit;
+        // 1. Buscamos un punto en la dirección opuesta dentro del NavMesh
+        if (NavMesh.SamplePosition(puntoHuida, out hit, 10f, NavMesh.AllAreas))
+        {
+            agent.SetDestination(hit.position);
+            estadoIA.Value = 2; // Animación de carrera
+        }
+        else
+        {
+            // 2. Si hay pared detrás, busca un punto aleatorio alejado para no atascarse
+            Vector3 puntoAleatorio = transform.position + Random.insideUnitSphere * 8f;
+            if (NavMesh.SamplePosition(puntoAleatorio, out hit, 8f, NavMesh.AllAreas))
+            {
+                agent.SetDestination(hit.position);
+                estadoIA.Value = 2;
+            }
+        }
     }
 
     void BuscarJugadorMasCercano()
@@ -93,13 +135,11 @@ public class EnemigoIANet : NetworkBehaviour
     {
         agent.speed = 2f; // Velocidad de patrulla lenta
 
-        // Si ya llegó a su punto aleatorio, busca otro
         if (agent.remainingDistance <= agent.stoppingDistance)
         {
             Vector3 puntoAleatorio = transform.position + Random.insideUnitSphere * radioDivagar;
             NavMeshHit hit;
 
-            // Busca un punto válido en el suelo azul (NavMesh)
             if (NavMesh.SamplePosition(puntoAleatorio, out hit, radioDivagar, NavMesh.AllAreas))
             {
                 agent.SetDestination(hit.position);
@@ -108,17 +148,15 @@ public class EnemigoIANet : NetworkBehaviour
             }
             else
             {
-                estadoIA.Value = 0; // Si no encuentra camino, se queda quieto
+                estadoIA.Value = 0;
             }
         }
     }
 
     void AtacarJugador()
     {
-        // Avisar a todos los clientes que reproduzcan la animación de golpe
         EjecutarAnimacionAtaqueClientRpc();
 
-        // Hacer el daño matemático al jugador
         SaludJugadorRed salud = jugadorObjetivo.GetComponent<SaludJugadorRed>();
         if (salud != null)
         {
