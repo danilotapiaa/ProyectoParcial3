@@ -6,7 +6,7 @@ public class DungeonManagerNet : NetworkBehaviour
     public NetworkVariable<int> llavesCompartidas = new NetworkVariable<int>(0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     public NetworkVariable<int> estadoJuego = new NetworkVariable<int>(0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
-    // NUEVA VARIABLE: Guarda si la esfera fue tocada
+    // Variable para controlar si la esfera fue tocada
     public NetworkVariable<bool> esferaTocada = new NetworkVariable<bool>(false, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
     public GameObject puertaCerrada;
@@ -43,12 +43,27 @@ public class DungeonManagerNet : NetworkBehaviour
         }
     }
 
-    // Método para activar el estado de la esfera (Solo el servidor lo llama)
+    // Activa el modo huida por 20 segundos
     public void ActivarEsfera()
     {
         if (IsServer)
         {
             esferaTocada.Value = true;
+
+            // Cancela un temporizador previo si se recoge otra esfera antes de tiempo
+            CancelInvoke(nameof(DesactivarEsfera));
+
+            // Programa la desactivación para dentro de 10 segundos
+            Invoke(nameof(DesactivarEsfera), 10f);
+        }
+    }
+
+    // Método que apaga el efecto al terminar el tiempo
+    private void DesactivarEsfera()
+    {
+        if (IsServer)
+        {
+            esferaTocada.Value = false; // Los monstruos vuelven a atacar
         }
     }
 
